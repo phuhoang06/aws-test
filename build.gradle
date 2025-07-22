@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.1' // Đã cập nhật phiên bản mới hơn một chút
+    id 'io.spring.dependency-management' version '1.1.5' // Đã cập nhật phiên bản mới hơn một chút
+}
+
+group = 'com.MM'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Sử dụng BOM (Bill of Materials) của AWS SDK để quản lý phiên bản
+dependencyManagement {
+    imports {
+        mavenBom "software.amazon.awssdk:bom:2.25.64" // Quản lý tất cả phiên bản AWS tại đây
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // 1. Chỉ cần khai báo `s3-transfer-manager`.
+    // Phiên bản sẽ được tự động lấy từ BOM đã khai báo ở trên.
+    implementation 'software.amazon.awssdk:s3-transfer-manager'
+
+    // 2. Client bất đồng bộ cho S3TransferManager hoạt động.
+    // Phiên bản cũng được quản lý bởi BOM.
+    implementation 'software.amazon.awssdk:netty-nio-client'
+
+    // 3. HttpClient cho việc tải file từ URL về.
+    implementation 'org.apache.httpcomponents:httpclient:4.5.14' // Cập nhật phiên bản patch
+
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.17'
+
+    // Lombok và Jackson
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
