@@ -1,16 +1,19 @@
 package com.mm.image_aws.service;
 
 import com.mm.image_aws.config.AwsProperties;
+import com.mm.image_aws.dto.JobStatus;
+import com.mm.image_aws.dto.UploadJob;
 import com.mm.image_aws.service.transformer.UrlTransformer;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.Upload;
 import software.amazon.awssdk.transfer.s3.model.UploadRequest;
@@ -33,21 +36,58 @@ public class UploadService {
     private final S3TransferManager transferManager;
     private final HttpClient httpClient;
     private final List<UrlTransformer> urlTransformers;
+    private final JobRepository jobRepository;
 
     private static final Map<String, String> CONTENT_TYPE_TO_EXTENSION_MAP = Map.ofEntries(
             Map.entry("image/jpeg", ".jpg"),
             Map.entry("image/png", ".png")
-            // ... có thể thêm các định dạng khác nếu cần
+            // ... add more types as needed
     );
 
-    public List<String> uploadImagesFromUrls(List<String> imageUrls) {
-        List<CompletableFuture<String>> uploadFutures = imageUrls.stream()
-                .map(this::uploadImageFromUrlAsync)
-                .collect(Collectors.toList());
+    public UploadJob submitUploadJob(List<String> imageUrls) {
+        String jobId = UUID.randomUUID().toString();
+        UploadJob job = new UploadJob(jobId, imageUrls.size());
+        jobRepository.save(job);
 
-        return uploadFutures.stream()
-                .map(CompletableFuture::join)
-                .collect(Collectors.toList());
+        processImagesInBackground(job, imageUrls);
+        return job;
+    }
+
+    public Optional<UploadJob> getJobStatus(String jobId) {
+        return jobRepository.findById(jobId);
+    }
+
+    @Async("taskExecutor")
+    public void processImagesInBackground(UploadJob job, List<String> imageUrls) {
+        job.setStatus(JobStatus.PROCESSING);
+        jobRepository.save(job);
+
+        try {
+            List<CompletableFuture<Void>> uploadFutures = imageUrls.stream()
+                    .map(url -> uploadImageFromUrlAsync(url)
+                            .thenAccept(cdnUrl -> {
+                                job.addCdnUrl(cdnUrl);
+                                job.incrementProcessedCount();
+                                jobRepository.save(job);
+                            })
+                            .exceptionally(ex -> {
+                                log.error("Failed to process URL {}: {}", url, ex.getMessage());
+                                job.incrementProcessedCount();
+                                jobRepository.save(job);
+                                return null;
+                            })
+                    )
+                    .collect(Collectors.toList());
+
+            CompletableFuture.allOf(uploadFutures.toArray(new CompletableFuture[0])).join();
+            job.setStatus(JobStatus.COMPLETED);
+        } catch (Exception e) {
+            log.error("Error processing job {}", job.getJobId(), e);
+            job.setStatus(JobStatus.FAILED);
+            job.setErrorMessage(e.getMessage());
+        } finally {
+            jobRepository.save(job);
+        }
     }
 
     private CompletableFuture<String> uploadImageFromUrlAsync(String imageUrl) {
@@ -64,17 +104,16 @@ public class UploadService {
                 long contentLength = entity.getContentLength();
 
                 if (!contentType.startsWith("image/")) {
-                    throw new IllegalArgumentException("URL không phải là hình ảnh: " + imageUrl);
+                    throw new IllegalArgumentException("URL is not an image: " + imageUrl);
                 }
                 if (contentLength > config.getMaxFileSize()) {
-                    throw new IllegalArgumentException("Kích thước tệp vượt quá giới hạn cho phép");
+                    throw new IllegalArgumentException("File size exceeds limit");
                 }
 
                 String extension = getExtensionFromContentType(contentType);
                 String fileName = UUID.randomUUID() + extension;
 
                 try (InputStream inputStream = entity.getContent()) {
-                    // **FIX:** Đọc InputStream vào một mảng byte
                     byte[] contentBytes = inputStream.readAllBytes();
 
                     UploadRequest uploadRequest = UploadRequest.builder()
@@ -82,25 +121,23 @@ public class UploadService {
                                     .key(fileName)
                                     .contentType(contentType)
                                     .build())
-                            // **FIX:** Sử dụng fromBytes để tạo AsyncRequestBody
                             .requestBody(AsyncRequestBody.fromBytes(contentBytes))
                             .build();
 
                     Upload upload = transferManager.upload(uploadRequest);
 
-                    log.info("Bắt đầu tải tệp {} từ URL: {}", fileName, imageUrl);
+                    log.info("Uploading file {} from URL: {}", fileName, imageUrl);
 
-                    // Chờ cho đến khi quá trình tải lên hoàn tất và trả về URL công khai
                     return upload.completionFuture()
                             .thenApply(completedUpload -> {
-                                log.info("Hoàn tất tải tệp {}", fileName);
+                                log.info("Completed upload for file {}", fileName);
                                 return buildS3PublicUrl(fileName);
                             }).join();
                 }
 
             } catch (IOException e) {
-                log.error("Lỗi khi tải từ URL: {}", directImageUrl, e);
-                throw new RuntimeException("Lỗi khi tải từ URL: " + directImageUrl, e);
+                log.error("Error downloading from URL: {}", directImageUrl, e);
+                throw new RuntimeException("Error downloading from URL: " + directImageUrl, e);
             }
         });
     }
@@ -121,7 +158,7 @@ public class UploadService {
 
     private void validateImageUrl(String url) {
         if (url == null || !url.matches("^https?://.*")) {
-            throw new IllegalArgumentException("URL không hợp lệ: " + url);
+            throw new IllegalArgumentException("Invalid URL: " + url);
         }
     }
 
