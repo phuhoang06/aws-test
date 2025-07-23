@@ -33,16 +33,14 @@ dependencyManagement {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
-    // 1. Chỉ cần khai báo `s3-transfer-manager`.
-    // Phiên bản sẽ được tự động lấy từ BOM đã khai báo ở trên.
+    // 1. S3TransferManager
     implementation 'software.amazon.awssdk:s3-transfer-manager'
 
-    // 2. Client bất đồng bộ cho S3TransferManager hoạt động.
-    // Phiên bản cũng được quản lý bởi BOM.
+    // 2. Netty client cho S3
     implementation 'software.amazon.awssdk:netty-nio-client'
 
-    // 3. HttpClient cho việc tải file từ URL về.
-    implementation 'org.apache.httpcomponents:httpclient:4.5.14' // Cập nhật phiên bản patch
+    // 3. Apache HttpClient 5 (Bao gồm cả tính năng bất đồng bộ)
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.2.1'
 
     implementation 'software.amazon.awssdk.crt:aws-crt:0.29.17'
 

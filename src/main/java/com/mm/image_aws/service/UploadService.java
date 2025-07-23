@@ -5,13 +5,12 @@ import com.mm.image_aws.dto.JobStatus;
 import com.mm.image_aws.dto.UploadJob;
 import com.mm.image_aws.repo.JobRepository;
 import com.mm.image_aws.service.transformer.UrlTransformer;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
+import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
+import org.apache.hc.client5.http.async.methods.SimpleHttpResponse;
+import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
+import org.apache.hc.core5.concurrent.FutureCallback;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
@@ -19,8 +18,7 @@ import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.Upload;
 import software.amazon.awssdk.transfer.s3.model.UploadRequest;
 
-import java.io.IOException;
-import java.io.InputStream;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,21 +33,20 @@ public class UploadService {
 
     private final AwsProperties config;
     private final S3TransferManager transferManager;
-    private final HttpClient httpClient;
     private final List<UrlTransformer> urlTransformers;
     private final JobRepository jobRepository;
+    private final CloseableHttpAsyncClient httpAsyncClient; // <-- Sử dụng client mới
 
     private static final Map<String, String> CONTENT_TYPE_TO_EXTENSION_MAP = Map.ofEntries(
             Map.entry("image/jpeg", ".jpg"),
             Map.entry("image/png", ".png")
-            // ... add more types as needed
     );
 
+    // (Các phương thức submitUploadJob, getJobStatus, processImagesInBackground giữ nguyên)
     public UploadJob submitUploadJob(List<String> imageUrls) {
         String jobId = UUID.randomUUID().toString();
         UploadJob job = new UploadJob(jobId, imageUrls.size());
         jobRepository.save(job);
-
         processImagesInBackground(job, imageUrls);
         return job;
     }
@@ -67,23 +64,24 @@ public class UploadService {
             List<CompletableFuture<Void>> uploadFutures = imageUrls.stream()
                     .map(url -> uploadImageFromUrlAsync(url)
                             .thenAccept(cdnUrl -> {
-                                job.addCdnUrl(cdnUrl);
+                                if (cdnUrl != null) {
+                                    job.addCdnUrl(cdnUrl);
+                                }
                                 job.incrementProcessedCount();
                                 jobRepository.save(job);
                             })
                             .exceptionally(ex -> {
-                                log.error("Failed to process URL {}: {}", url, ex.getMessage());
+                                log.error("Không thể xử lý URL {}: {}", url, ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage());
                                 job.incrementProcessedCount();
                                 jobRepository.save(job);
                                 return null;
-                            })
-                    )
+                            }))
                     .collect(Collectors.toList());
 
             CompletableFuture.allOf(uploadFutures.toArray(new CompletableFuture[0])).join();
             job.setStatus(JobStatus.COMPLETED);
         } catch (Exception e) {
-            log.error("Error processing job {}", job.getJobId(), e);
+            log.error("Lỗi khi xử lý job {}", job.getJobId(), e);
             job.setStatus(JobStatus.FAILED);
             job.setErrorMessage(e.getMessage());
         } finally {
@@ -91,56 +89,85 @@ public class UploadService {
         }
     }
 
+
+    // THAY ĐỔI LỚN: Viết lại phương thức này để dùng HttpAsyncClient
     private CompletableFuture<String> uploadImageFromUrlAsync(String imageUrl) {
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<String> overallFuture = new CompletableFuture<>();
+        try {
             validateImageUrl(imageUrl);
             String directImageUrl = normalizeUrlForDirectDownload(imageUrl);
 
-            try {
-                HttpGet request = new HttpGet(directImageUrl);
-                HttpResponse response = httpClient.execute(request);
-                HttpEntity entity = response.getEntity();
+            final SimpleHttpRequest request = SimpleHttpRequest.create("GET", URI.create(directImageUrl));
+            // Không cần timeout ở đây vì connection manager đã quản lý
 
-                String contentType = entity.getContentType().getValue();
-                long contentLength = entity.getContentLength();
+            httpAsyncClient.execute(request, new FutureCallback<SimpleHttpResponse>() {
+                @Override
+                public void completed(SimpleHttpResponse response) {
+                    try {
+                        if (response.getCode() != 200) {
+                            throw new RuntimeException("Server returned status " + response.getCode());
+                        }
 
-                if (!contentType.startsWith("image/")) {
-                    throw new IllegalArgumentException("URL is not an image: " + imageUrl);
+                        String contentType = Optional.ofNullable(response.getContentType()).map(Object::toString).orElse("application/octet-stream");
+                        if (!contentType.startsWith("image/")) {
+                            throw new IllegalArgumentException("URL is not an image: " + contentType);
+                        }
+
+                        byte[] contentBytes = response.getBodyBytes();
+                        if (contentBytes == null || contentBytes.length == 0) {
+                            throw new IllegalArgumentException("Response body is empty.");
+                        }
+
+                        long contentLength = contentBytes.length;
+
+                        if (contentLength > config.getMaxFileSize()) {
+                            throw new IllegalArgumentException("File size exceeds limit");
+                        }
+
+                        String extension = getExtensionFromContentType(contentType);
+                        final String fileName = UUID.randomUUID() + extension;
+
+                        UploadRequest uploadRequest = UploadRequest.builder()
+                                .putObjectRequest(req -> req.bucket(config.getBucket())
+                                        .key(fileName)
+                                        .contentType(contentType))
+                                .requestBody(AsyncRequestBody.fromBytes(contentBytes))
+                                .build();
+
+                        log.info("Đang tải file {} từ URL: {}", fileName, imageUrl);
+                        Upload upload = transferManager.upload(uploadRequest);
+
+                        // Nối chuỗi CompletableFuture
+                        upload.completionFuture()
+                                .thenApply(completedUpload -> buildS3PublicUrl(fileName))
+                                .whenComplete((cdnUrl, error) -> {
+                                    if (error != null) {
+                                        overallFuture.completeExceptionally(error);
+                                    } else {
+                                        overallFuture.complete(cdnUrl);
+                                    }
+                                });
+
+                    } catch (Exception e) {
+                        overallFuture.completeExceptionally(e);
+                    }
                 }
-                if (contentLength > config.getMaxFileSize()) {
-                    throw new IllegalArgumentException("File size exceeds limit");
+
+                @Override
+                public void failed(Exception ex) {
+                    overallFuture.completeExceptionally(ex);
                 }
 
-                String extension = getExtensionFromContentType(contentType);
-                String fileName = UUID.randomUUID() + extension;
-
-                try (InputStream inputStream = entity.getContent()) {
-                    byte[] contentBytes = inputStream.readAllBytes();
-
-                    UploadRequest uploadRequest = UploadRequest.builder()
-                            .putObjectRequest(req -> req.bucket(config.getBucket())
-                                    .key(fileName)
-                                    .contentType(contentType)
-                                    .build())
-                            .requestBody(AsyncRequestBody.fromBytes(contentBytes))
-                            .build();
-
-                    Upload upload = transferManager.upload(uploadRequest);
-
-                    log.info("Uploading file {} from URL: {}", fileName, imageUrl);
-
-                    return upload.completionFuture()
-                            .thenApply(completedUpload -> {
-                                log.info("Completed upload for file {}", fileName);
-                                return buildS3PublicUrl(fileName);
-                            }).join();
+                @Override
+                public void cancelled() {
+                    overallFuture.cancel(true);
                 }
+            });
 
-            } catch (IOException e) {
-                log.error("Error downloading from URL: {}", directImageUrl, e);
-                throw new RuntimeException("Error downloading from URL: " + directImageUrl, e);
-            }
-        });
+        } catch (Exception e) {
+            overallFuture.completeExceptionally(e);
+        }
+        return overallFuture;
     }
 
     private String normalizeUrlForDirectDownload(String url) {
@@ -165,7 +192,9 @@ public class UploadService {
 
     private String buildS3PublicUrl(String fileName) {
         if (config.getCdnDomain() != null && !config.getCdnDomain().isEmpty()) {
-            return config.getCdnDomain() + "/" + fileName;
+            String cdnDomain = config.getCdnDomain();
+            String prefix = cdnDomain.startsWith("http") ? "" : "https://";
+            return prefix + cdnDomain + "/" + fileName;
         }
         return "https://" + config.getBucket() + ".s3." + config.getRegion() + ".amazonaws.com/" + fileName;
     }

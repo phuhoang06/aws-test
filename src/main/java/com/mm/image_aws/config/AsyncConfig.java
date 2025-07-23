@@ -14,11 +14,8 @@ public class AsyncConfig {
     @Bean(name = "taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // Số lượng thread cốt lõi, luôn sẵn sàng
-        executor.setCorePoolSize(10); 
-        // Số lượng thread tối đa có thể tạo ra
-        executor.setMaxPoolSize(50);
-        // Số lượng tác vụ có thể nằm trong hàng đợi trước khi bị từ chối
+        executor.setCorePoolSize(12);
+        executor.setMaxPoolSize(12);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("UrlUpload-");
         executor.initialize();

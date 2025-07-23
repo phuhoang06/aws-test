@@ -11,5 +11,5 @@ public class AwsProperties {
     private String region;
     private String bucket;
     private String cdnDomain;
-    private long maxFileSize = 500000* 1024 * 1024; // Mặc định là 5MB
+    private long maxFileSize = 50000* 1024 * 1024; // Mặc định là 5MB
 }

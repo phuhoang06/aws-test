@@ -1,37 +1,48 @@
-
-
 package com.mm.image_aws.config;
 
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
+import org.apache.hc.client5.http.async.methods.SimpleHttpResponse;
+import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
+import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
+import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
+import org.apache.hc.core5.concurrent.FutureCallback;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
-import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
+
+import java.util.concurrent.CompletableFuture;
 
 @Configuration
 @EnableConfigurationProperties(AwsProperties.class)
 public class AppConfig {
 
+    // THAY ĐỔI: Tạo một Bean cho HttpAsyncClient
     @Bean
-    public CloseableHttpClient httpClient() {
-        return HttpClientBuilder.create()
-                .setUserAgent("Mozilla/5.0")
-                .setMaxConnTotal(200)
-                .setMaxConnPerRoute(100)
+    public CloseableHttpAsyncClient httpAsyncClient() {
+        // Cấu hình một connection pool mạnh mẽ
+        final PoolingAsyncClientConnectionManager connectionManager = new PoolingAsyncClientConnectionManager();
+        // Giới hạn tổng số kết nối đồng thời
+        connectionManager.setMaxTotal(100);
+        // Giới hạn số kết nối đến một host cụ thể (quan trọng!)
+        connectionManager.setDefaultMaxPerRoute(20);
+
+        CloseableHttpAsyncClient client = HttpAsyncClients.custom()
+                .setConnectionManager(connectionManager)
+                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                 .build();
+
+        client.start();
+        return client;
     }
 
+    // Bean S3AsyncClient giữ nguyên
     @Bean
     public S3AsyncClient s3AsyncClient(AwsProperties awsProperties) {
-        // Sử dụng trình xây dựng CRT để có hiệu suất tối ưu.
-        // Lưu ý: Cần thêm dependency 'software.amazon.awssdk.crt:aws-crt' vào project.
         return S3AsyncClient.crtBuilder()
                 .credentialsProvider(
                         StaticCredentialsProvider.create(
@@ -39,12 +50,10 @@ public class AppConfig {
                         )
                 )
                 .region(Region.of(awsProperties.getRegion()))
-                // Bạn có thể tinh chỉnh thêm các thông số khác tại đây nếu cần
-                // .targetThroughputInGbps(20.0)
-                // .minimumPartSizeInBytes(8 * 1024 * 1024L)
                 .build();
     }
 
+    // Bean S3TransferManager giữ nguyên
     @Bean
     public S3TransferManager s3TransferManager(S3AsyncClient s3AsyncClient) {
         return S3TransferManager.builder()
