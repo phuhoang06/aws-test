@@ -1,4 +1,4 @@
-package com.mm.image_aws.service;
+package com.mm.image_aws.repo;
 
 import com.mm.image_aws.dto.UploadJob;
 import org.springframework.stereotype.Repository;

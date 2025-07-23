@@ -3,6 +3,7 @@ package com.mm.image_aws.service;
 import com.mm.image_aws.config.AwsProperties;
 import com.mm.image_aws.dto.JobStatus;
 import com.mm.image_aws.dto.UploadJob;
+import com.mm.image_aws.repo.JobRepository;
 import com.mm.image_aws.service.transformer.UrlTransformer;
 
 import lombok.RequiredArgsConstructor;
