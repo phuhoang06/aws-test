@@ -1,7 +1,7 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.3.1' // Đã cập nhật phiên bản mới hơn một chút
-    id 'io.spring.dependency-management' version '1.1.5' // Đã cập nhật phiên bản mới hơn một chút
+    id 'org.springframework.boot' version '3.3.1'
+    id 'io.spring.dependency-management' version '1.1.5'
 }
 
 group = 'com.MM'
@@ -13,36 +13,44 @@ java {
     }
 }
 
-configurations {
-    compileOnly {
-        extendsFrom annotationProcessor
-    }
-}
-
 repositories {
     mavenCentral()
 }
 
-// Sử dụng BOM (Bill of Materials) của AWS SDK để quản lý phiên bản
 dependencyManagement {
     imports {
-        mavenBom "software.amazon.awssdk:bom:2.25.64" // Quản lý tất cả phiên bản AWS tại đây
+        mavenBom "software.amazon.awssdk:bom:2.25.64"
     }
 }
 
 dependencies {
+    // Spring Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
-    // 1. S3TransferManager
+    // === THÊM MỚI: Spring Security ===
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // Spring Data JPA để làm việc với CSDL
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // Oracle Driver
+    runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
+
+    // Thư viện trích xuất metadata từ ảnh
+    implementation 'com.drewnoakes:metadata-extractor:2.18.0'
+
+    // AWS S3
     implementation 'software.amazon.awssdk:s3-transfer-manager'
-
-    // 2. Netty client cho S3
     implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.17'
 
-    // 3. Apache HttpClient 5 (Bao gồm cả tính năng bất đồng bộ)
+    // Apache HttpClient
     implementation 'org.apache.httpcomponents.client5:httpclient5:5.2.1'
 
-    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.17'
+    // === THÊM MỚI: Thư viện JWT ===
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5' // Hoặc jjwt-gson nếu bạn dùng Gson
 
     // Lombok và Jackson
     compileOnly 'org.projectlombok:lombok'
@@ -51,6 +59,8 @@ dependencies {
 
     // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Thêm spring-security-test để hỗ trợ test các endpoint được bảo vệ
+    testImplementation 'org.springframework.security:spring-security-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
