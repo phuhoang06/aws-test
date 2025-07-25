@@ -10,5 +10,6 @@ import java.util.Optional;
 public interface UploadJobRepository extends JpaRepository<UploadJob, Long> {
 
     // Spring Data JPA sẽ tự động tạo câu lệnh query dựa trên tên phương thức
-    Optional<UploadJob> findByJobId(String jobId);
+    // SỬA LỖI: Đổi kiểu tham số từ String sang Long để khớp với kiểu của trường 'jobId' trong entity UploadJob.
+    Optional<UploadJob> findByJobId(Long jobId);
 }

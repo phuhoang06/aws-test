@@ -1,19 +1,15 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.2.5'
-    id 'io.spring.dependency-management' version '1.1.4'
+    id 'org.springframework.boot' version '3.3.1'
+    id 'io.spring.dependency-management' version '1.1.5'
 }
 
-group = 'com.mm'
+group = 'com.MM'
 version = '0.0.1-SNAPSHOT'
 
 java {
-    sourceCompatibility = '17'
-}
-
-configurations {
-    compileOnly {
-        extendsFrom annotationProcessor
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
@@ -21,25 +17,56 @@ repositories {
     mavenCentral()
 }
 
+dependencyManagement {
+    imports {
+        mavenBom "software.amazon.awssdk:bom:2.25.64"
+    }
+}
+
 dependencies {
-    // Các dependency đã có
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // Spring Web & Security
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // === Spring Data Redis ===
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // Spring Data JPA & Oracle Driver
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
+
+    // Thư viện trích xuất metadata từ ảnh
+    implementation 'com.drewnoakes:metadata-extractor:2.18.0'
+
+    // AWS S3
+    implementation 'software.amazon.awssdk:s3-transfer-manager'
+    implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.17'
+
+    // Apache HttpClient
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.2.1'
+
+    // Thư viện JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
-    implementation 'com.amazonaws:aws-java-sdk-s3:1.12.716'
-    implementation 'com.drewnoakes:metadata-extractor:2.19.0'
 
-    // **Thêm thư viện JavaFaker vào đây**
-    implementation 'com.github.javafaker:javafaker:1.0.2'
-
+    // Lombok và Jackson
     compileOnly 'org.projectlombok:lombok'
-    runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
     annotationProcessor 'org.projectlombok:lombok'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // === THÊM MỚI: Thư viện JavaFaker để tạo dữ liệu mẫu ===
+    implementation('com.github.javafaker:javafaker:1.0.2') {
+        exclude group: 'org.yaml', module: 'snakeyaml'
+    }
+
+    // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {

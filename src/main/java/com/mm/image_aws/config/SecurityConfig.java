@@ -2,6 +2,7 @@ package com.mm.image_aws.config;
 
 import com.mm.image_aws.security.JwtAuthenticationEntryPoint;
 import com.mm.image_aws.security.JwtAuthenticationFilter;
+import com.mm.image_aws.security.UserDetailsServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,50 +16,65 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    private final UserDetailsServiceImpl userDetailsService;
+    private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    // FIX: Inject the JwtAuthenticationFilter bean directly
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
-    private final JwtAuthenticationEntryPoint unauthorizedHandler;
+
+    // FIX: Remove the @Bean method that creates a new, unmanaged instance
+    // @Bean
+    // public JwtAuthenticationFilter jwtAuthenticationFilter() {
+    //     return new JwtAuthenticationFilter();
+    // }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
+        return authenticationConfiguration.getAuthenticationManager();
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // Vô hiệu hóa CSRF vì chúng ta dùng JWT (stateless)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
-
-                // Cấu hình xử lý exception, đặc biệt là lỗi 401 Unauthorized
-                .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
-
-                // Cấu hình session management là STATELESS, vì chúng ta không dùng session
+                .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
-                // Cấu hình quyền truy cập cho các request
                 .authorizeHttpRequests(authorize -> authorize
-                        // Cho phép tất cả các request đến /api/auth/** (đăng ký, đăng nhập)
                         .requestMatchers("/api/auth/**").permitAll()
-                        // Tất cả các request khác đều yêu cầu xác thực
                         .anyRequest().authenticated()
                 );
 
-        // Thêm filter JWT của chúng ta vào trước filter UsernamePasswordAuthenticationFilter
+        // FIX: Use the injected, Spring-managed instance of the filter
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        // Sử dụng BCrypt để mã hóa mật khẩu, đây là tiêu chuẩn hiện nay
-        return new BCryptPasswordEncoder();
-    }
-
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
-        // Bean này cần thiết cho việc xác thực ở AuthController
-        return authenticationConfiguration.getAuthenticationManager();
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of("*"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("*"));
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 }

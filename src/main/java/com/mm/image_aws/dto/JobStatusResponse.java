@@ -28,7 +28,7 @@ public class JobStatusResponse {
      */
     public static JobStatusResponse fromJob(UploadJob job) {
         JobStatusResponse response = new JobStatusResponse();
-        response.setJobId(job.getJobId());
+        response.setJobId(job.getJobId() != null ? job.getJobId().toString() : null);
         response.setStatus(job.getStatus());
         response.setCreatedAt(job.getCreatedAt());
         response.setUpdatedAt(job.getUpdatedAt());

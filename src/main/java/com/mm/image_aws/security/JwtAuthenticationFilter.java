@@ -1,17 +1,15 @@
-// File: src/main/java/com/mm/image_aws/security/JwtAuthenticationFilter.java
-// NỘI DUNG ĐẦY ĐỦ CỦA FILE ĐÃ SỬA LỖI
 package com.mm.image_aws.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import org.springframework.lang.NonNull;
+import org.slf4j.Logger; // === THÊM MỚI ===
+import org.slf4j.LoggerFactory; // === THÊM MỚI ===
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -20,45 +18,45 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 @Component
-@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    // === SỬA LỖI: Khai báo một logger SLF4J mới để sử dụng ===
+    private static final Logger slf4jLogger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+
     private final JwtTokenProvider tokenProvider;
-    private final UserDetailsService userDetailsService;
+    private final UserDetailsServiceImpl userDetailsService;
+
+    @Autowired
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, UserDetailsServiceImpl userDetailsService) {
+        this.tokenProvider = tokenProvider;
+        this.userDetailsService = userDetailsService;
+    }
 
     @Override
-    protected void doFilterInternal(
-            @NonNull HttpServletRequest request,
-            @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain) throws ServletException, IOException {
-
-        // ======================== PHẦN SỬA LỖI ========================
-        // Nếu request path là một trong các endpoint công khai (/api/auth/**),
-        // chúng ta sẽ bỏ qua hoàn toàn việc kiểm tra token và cho request đi tiếp.
-        if (request.getServletPath().contains("/api/auth")) {
-            filterChain.doFilter(request, response);
-            return; // Rất quan trọng: return để kết thúc filter tại đây.
-        }
-        // =============================================================
-
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
         try {
             String jwt = getJwtFromRequest(request);
 
-            // Chỉ xử lý token nếu nó tồn tại và người dùng chưa được xác thực trong context
-            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt) && SecurityContextHolder.getContext().getAuthentication() == null) {
-                String userEmail = tokenProvider.getUserEmailFromJWT(jwt);
+            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
+                String username = tokenProvider.getUsernameFromJWT(jwt);
+                // === SỬA LỖI: Sử dụng logger mới ===
+                slf4jLogger.info("Token validated successfully for user: '{}'", username);
 
-                UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                // Set thông tin xác thực vào SecurityContext
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+            } else if (StringUtils.hasText(jwt)) {
+                // === SỬA LỖI: Sử dụng logger mới ===
+                slf4jLogger.warn("Token validation failed for token starting with: '{}...'", jwt.substring(0, 10));
             }
         } catch (Exception ex) {
-            // Lỗi này sẽ được chuyển đến JwtAuthenticationEntryPoint để xử lý
-            logger.error("Không thể set user authentication trong security context", ex);
+            // === SỬA LỖI: Sử dụng logger mới ===
+            slf4jLogger.error("Could not set user authentication in security context", ex);
         }
 
         filterChain.doFilter(request, response);
